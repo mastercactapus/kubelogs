@@ -19,7 +19,7 @@ const (
 	logMessageFieldAnnotation = "kubelogs/messagefield"
 )
 
-type namespace struct {
+type cluster struct {
 	o      *options
 	name   string
 	ctx    context.Context
@@ -55,26 +55,25 @@ type podStatus struct {
 	}
 }
 
-func (c *cluster) newNamespace(name string) (*namespace, error) {
-	ns := &namespace{
-		name: name,
-		o:    c.o,
+func newCluster(o *options) (*cluster, error) {
+	c := &cluster{
+		name: o.clusterName,
+		o:    o,
 		pods: make(map[string]*pod, 100),
-		l:    c.l.WithField("namespace", name),
+		l:    log.WithField("cluster", o.clusterName),
 	}
 
-	ns.ctx, ns.cancel = context.WithCancel(c.ctx)
+	c.ctx, c.cancel = context.WithCancel(context.Background())
 
-	es, err := c.o.newEventStream(ns.ctx, "api/v1/namespaces/"+url.QueryEscape(name)+"/pods")
+	es, err := o.newEventStream(c.ctx, "api/v1/pods")
 	if err != nil {
-		ns.cancel()
+		c.cancel()
 		return nil, err
 	}
 
-	ns.es = es
-	go ns.loop()
+	c.es = es
 
-	return ns, nil
+	return c, nil
 }
 
 func (ct *container) getJSONFields(data, messageField string) (log.Fields, string, error) {
@@ -194,34 +193,34 @@ func (p *pod) updateContainers(msg json.RawMessage) {
 	}
 }
 
-func (ns *namespace) loop() {
-	for e := range ns.es.C {
+func (c *cluster) loop() {
+	for e := range c.es.C {
 		if e.Object.Kind != "Pod" {
-			ns.l.Warnln("unknown object type, expected 'Pod':", e.Object.Kind)
+			c.l.Warnln("unknown object type, expected 'Pod':", e.Object.Kind)
 			continue
 		}
 		var p *pod
 		switch e.Type {
 		case eventTypeAdded:
-			p = ns.pods[e.Object.Metadata.Name]
+			p = c.pods[e.Object.Metadata.Name]
 			if p != nil {
 				// cleanup existing, if for some reason we got it again
-				ns.l.Warnln("got ADDED event for already known pod:", e.Object.Metadata.Name)
+				c.l.Warnln("got ADDED event for already known pod:", e.Object.Metadata.Name)
 				p.cancel()
-				delete(ns.pods, e.Object.Metadata.Name)
+				delete(c.pods, e.Object.Metadata.Name)
 			}
 			p = &pod{
 				containers: make(map[string]*container, 10),
-				l:          ns.l.WithField("pod", e.Object.Metadata.Name).WithField("nodeName", e.Object.Spec.NodeName),
+				l:          c.l.WithField("pod", e.Object.Metadata.Name).WithField("nodeName", e.Object.Spec.NodeName).WithField("namespace", e.Object.Metadata.Namespace),
 				name:       e.Object.Metadata.Name,
-				namespace:  ns.name,
-				o:          ns.o,
+				namespace:  e.Object.Metadata.Namespace,
+				o:          c.o,
 			}
-			if ns.o.mergeLabels && e.Object.Metadata.Labels != nil {
+			if c.o.mergeLabels && e.Object.Metadata.Labels != nil {
 				p.l = p.l.WithField("labels", e.Object.Metadata.Labels)
 			}
 
-			if ns.o.decode && e.Object.Metadata.Annotations != nil && e.Object.Metadata.Annotations[logFormatAnnotation] == "json" {
+			if c.o.decode && e.Object.Metadata.Annotations != nil && e.Object.Metadata.Annotations[logFormatAnnotation] == "json" {
 				decodeField := e.Object.Metadata.Annotations[logMessageFieldAnnotation]
 				if decodeField == "" {
 					decodeField = "msg"
@@ -229,23 +228,23 @@ func (ns *namespace) loop() {
 
 				p.decodeField = decodeField
 			}
-			p.ctx, p.cancel = context.WithCancel(ns.ctx)
-			ns.pods[e.Object.Metadata.Name] = p
+			p.ctx, p.cancel = context.WithCancel(c.ctx)
+			c.pods[e.Object.Metadata.Name] = p
 			p.updateContainers(e.Object.Status)
 			p.l.Debugln("added pod")
 		case eventTypeDeleted:
-			p = ns.pods[e.Object.Metadata.Name]
+			p = c.pods[e.Object.Metadata.Name]
 			if p == nil {
-				ns.l.Warnln("got DELETED event for unknown pod:", e.Object.Metadata.Name)
+				c.l.Warnln("got DELETED event for unknown pod:", e.Object.Metadata.Name)
 				continue
 			}
 			p.cancel()
-			delete(ns.pods, e.Object.Metadata.Name)
+			delete(c.pods, e.Object.Metadata.Name)
 			p.l.Debugln("deleted pod")
 		case eventTypeModified:
-			p = ns.pods[e.Object.Metadata.Name]
+			p = c.pods[e.Object.Metadata.Name]
 			if p == nil {
-				ns.l.Warnln("got MODIFIED event for unknown pod:", e.Object.Metadata.Name)
+				c.l.Warnln("got MODIFIED event for unknown pod:", e.Object.Metadata.Name)
 				continue
 			}
 			p.updateContainers(e.Object.Status)

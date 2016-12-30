@@ -17,6 +17,7 @@ type options struct {
 	since       time.Duration
 	decode      bool
 	mergeLabels bool
+	clusterName string
 	out         *log.Logger
 }
 
@@ -46,6 +47,7 @@ func main() {
 	since := flag.Duration("since", -1, "Only accept logs from this time on. If negative, this filter is ignored.")
 	decode := flag.Bool("decode", true, "Decode JSON-formatted messages for annotated pods, values will be under the 'event' key.")
 	mergeLabels := flag.Bool("labels", true, "Merge pod labels, values will be under the 'labels' key.")
+	clusterName := flag.String("cluster", "default", "Cluster name. Used as a label for events")
 	flag.Parse()
 
 	if *jsonOutput {
@@ -65,6 +67,7 @@ func main() {
 		decode:      *decode,
 		mergeLabels: *mergeLabels,
 		out:         log.New(),
+		clusterName: *clusterName,
 	}
 	opt.out.Out = os.Stdout
 	if *jsonOutput {

@@ -25,6 +25,7 @@ type event struct {
 		APIVersion string
 		Metadata   struct {
 			Name        string
+			Namespace   string
 			SelfLink    string
 			Labels      map[string]string
 			Annotations map[string]string
