@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -85,6 +86,8 @@ func (ct *container) getJSONFields(data, messageField string) (log.Fields, strin
 	msg, ok := f[messageField].(string)
 	if !ok && f[messageField] != nil {
 		ct.l.Warnln("message was not a string:", f[messageField])
+	} else {
+		delete(f, messageField)
 	}
 
 	return f, msg, nil
@@ -126,8 +129,11 @@ func (ct *container) log(decodeField string) {
 			break
 		}
 		if err != nil {
-			ct.l.Warnln(err)
-			// reconnect?
+			ct.l.Warnln("read error:", err)
+			resp.Body.Close()
+			time.Sleep(3 * time.Second)
+			ct.l.Debugln("reconnecting")
+			go ct.log(decodeField)
 			break
 		}
 		parts = strings.SplitN(line, " ", 2)
@@ -186,14 +192,6 @@ func (p *pod) updateContainers(msg json.RawMessage) {
 		go c.log(p.decodeField)
 		c.l.Debugln("added container")
 	}
-}
-
-func getLabelsAsFields(labels map[string]string) log.Fields {
-	f := make(log.Fields, len(labels))
-	for key, val := range labels {
-		f["label."+key] = val
-	}
-	return f
 }
 
 func (ns *namespace) loop() {
