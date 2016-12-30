@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -74,6 +75,9 @@ func (ct *container) log() {
 	v.Set("follow", "true")
 	v.Set("timestamps", "true")
 	v.Set("container", ct.name)
+	if ct.o.since >= 0 {
+		v.Set("sinceSeconds", strconv.Itoa(int(ct.o.since.Seconds())))
+	}
 	u := ct.o.buildEventURLWithQuery("api/v1/namespaces/"+url.QueryEscape(ct.namespace)+"/pods/"+url.QueryEscape(ct.pod)+"/log", v)
 
 	req, err := http.NewRequest("GET", u, nil)
@@ -192,8 +196,7 @@ func (ns *namespace) loop() {
 			p.l.Debugln("deleted pod")
 		case eventTypeModified:
 			p = ns.pods[e.Object.Metadata.Name]
-			if p != nil {
-				// cleanup existing, if for some reason we got it again
+			if p == nil {
 				ns.l.Warnln("got MODIFIED event for unknown pod:", e.Object.Metadata.Name)
 				continue
 			}

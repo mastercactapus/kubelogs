@@ -4,6 +4,7 @@ import (
 	"flag"
 	"net/url"
 	"path"
+	"time"
 
 	"context"
 
@@ -11,8 +12,8 @@ import (
 )
 
 type options struct {
-	u      url.URL
-	follow bool
+	u     url.URL
+	since time.Duration
 }
 
 func (o options) buildEventURL(apiPath string) string {
@@ -38,6 +39,7 @@ func main() {
 	k8sURL := flag.String("url", "http://127.0.0.1:8001/", "Kubernetes API URL")
 	jsonOutput := flag.Bool("json", false, "JSON output format")
 	verbose := flag.Bool("v", false, "Enable verbose logging")
+	since := flag.Duration("since", -1, "Only accept logs from this time on. If negative, this filter is ignored.")
 	flag.Parse()
 
 	if *jsonOutput {
@@ -51,7 +53,7 @@ func main() {
 	if err != nil {
 		log.WithField("URL", *k8sURL).Fatalln("invalid URL:", err)
 	}
-	opt := &options{u: *u}
+	opt := &options{u: *u, since: *since}
 
 	c, err := newCluster(opt)
 	if err != nil {
