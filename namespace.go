@@ -13,6 +13,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	logFormatAnnotation       = "kubelogs/logformat"
+	logMessageFieldAnnotation = "kubelogs/messagefield"
+)
+
 type namespace struct {
 	o      *options
 	name   string
@@ -23,13 +28,14 @@ type namespace struct {
 	es     *eventStream
 }
 type pod struct {
-	o          *options
-	ctx        context.Context
-	cancel     context.CancelFunc
-	containers map[string]*container
-	l          *log.Entry
-	namespace  string
-	name       string
+	o           *options
+	ctx         context.Context
+	cancel      context.CancelFunc
+	containers  map[string]*container
+	l           *log.Entry
+	namespace   string
+	name        string
+	decodeField string
 }
 type container struct {
 	o         *options
@@ -70,7 +76,21 @@ func (c *cluster) newNamespace(name string) (*namespace, error) {
 	return ns, nil
 }
 
-func (ct *container) log() {
+func (ct *container) getJSONFields(data, messageField string) (log.Fields, string, error) {
+	f := make(log.Fields)
+	err := json.Unmarshal([]byte(data), &f)
+	if err != nil {
+		return nil, "", err
+	}
+	msg, ok := f[messageField].(string)
+	if !ok && f[messageField] != nil {
+		ct.l.Warnln("message was not a string:", f[messageField])
+	}
+
+	return f, msg, nil
+}
+
+func (ct *container) log(decodeField string) {
 	v := make(url.Values, 2)
 	v.Set("follow", "true")
 	v.Set("timestamps", "true")
@@ -111,7 +131,17 @@ func (ct *container) log() {
 			break
 		}
 		parts = strings.SplitN(line, " ", 2)
-		ct.l.WithField("eventTime", parts[0]).Infoln(parts[1])
+		if decodeField == "" {
+			ct.o.out.WithFields(ct.l.WithField("eventTime", parts[0]).Data).Infoln(parts[1])
+		} else {
+			f, msg, err := ct.getJSONFields(parts[1], decodeField)
+			if err != nil {
+				ct.l.Warnln("failed to parse JSON:", err)
+				ct.o.out.WithFields(ct.l.WithField("eventTime", parts[0]).Data).Infoln(parts[1])
+				continue
+			}
+			ct.o.out.WithFields(ct.l.WithField("event", f).WithField("eventTime", parts[0]).Data).Infoln(msg)
+		}
 	}
 }
 
@@ -153,9 +183,17 @@ func (p *pod) updateContainers(msg json.RawMessage) {
 			o:         p.o,
 		}
 		c.ctx, c.cancel = context.WithCancel(p.ctx)
-		go c.log()
+		go c.log(p.decodeField)
 		c.l.Debugln("added container")
 	}
+}
+
+func getLabelsAsFields(labels map[string]string) log.Fields {
+	f := make(log.Fields, len(labels))
+	for key, val := range labels {
+		f["label."+key] = val
+	}
+	return f
 }
 
 func (ns *namespace) loop() {
@@ -180,6 +218,18 @@ func (ns *namespace) loop() {
 				name:       e.Object.Metadata.Name,
 				namespace:  ns.name,
 				o:          ns.o,
+			}
+			if ns.o.mergeLabels && e.Object.Metadata.Labels != nil {
+				p.l = p.l.WithFields(getLabelsAsFields(e.Object.Metadata.Labels))
+			}
+
+			if ns.o.decode && e.Object.Metadata.Annotations != nil && e.Object.Metadata.Annotations[logFormatAnnotation] == "json" {
+				decodeField := e.Object.Metadata.Annotations[logMessageFieldAnnotation]
+				if decodeField == "" {
+					decodeField = "msg"
+				}
+
+				p.decodeField = decodeField
 			}
 			p.ctx, p.cancel = context.WithCancel(ns.ctx)
 			ns.pods[e.Object.Metadata.Name] = p

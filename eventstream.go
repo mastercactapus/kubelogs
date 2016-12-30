@@ -24,8 +24,13 @@ type event struct {
 		Kind       string
 		APIVersion string
 		Metadata   struct {
-			Name     string
-			SelfLink string
+			Name        string
+			SelfLink    string
+			Labels      map[string]string
+			Annotations map[string]string
+			Spec        struct {
+				NodeName string
+			}
 		}
 		Status json.RawMessage
 	}

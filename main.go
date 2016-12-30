@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"net/url"
+	"os"
 	"path"
 	"time"
 
@@ -12,8 +13,11 @@ import (
 )
 
 type options struct {
-	u     url.URL
-	since time.Duration
+	u           url.URL
+	since       time.Duration
+	decode      bool
+	mergeLabels bool
+	out         *log.Logger
 }
 
 func (o options) buildEventURL(apiPath string) string {
@@ -40,6 +44,8 @@ func main() {
 	jsonOutput := flag.Bool("json", false, "JSON output format")
 	verbose := flag.Bool("v", false, "Enable verbose logging")
 	since := flag.Duration("since", -1, "Only accept logs from this time on. If negative, this filter is ignored.")
+	decode := flag.Bool("decode", true, "Decode JSON-formatted messages for annotated pods, prefixing fields with 'event.'.")
+	mergeLabels := flag.Bool("labels", true, "Merge pod labels, prefixed with 'label.' into log.")
 	flag.Parse()
 
 	if *jsonOutput {
@@ -53,7 +59,17 @@ func main() {
 	if err != nil {
 		log.WithField("URL", *k8sURL).Fatalln("invalid URL:", err)
 	}
-	opt := &options{u: *u, since: *since}
+	opt := &options{
+		u:           *u,
+		since:       *since,
+		decode:      *decode,
+		mergeLabels: *mergeLabels,
+		out:         log.New(),
+	}
+	opt.out.Out = os.Stdout
+	if *jsonOutput {
+		opt.out.Formatter = &log.JSONFormatter{}
+	}
 
 	c, err := newCluster(opt)
 	if err != nil {
