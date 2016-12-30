@@ -28,9 +28,9 @@ type event struct {
 			SelfLink    string
 			Labels      map[string]string
 			Annotations map[string]string
-			Spec        struct {
-				NodeName string
-			}
+		}
+		Spec struct {
+			NodeName string
 		}
 		Status json.RawMessage
 	}

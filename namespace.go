@@ -214,13 +214,13 @@ func (ns *namespace) loop() {
 			}
 			p = &pod{
 				containers: make(map[string]*container, 10),
-				l:          ns.l.WithField("pod", e.Object.Metadata.Name),
+				l:          ns.l.WithField("pod", e.Object.Metadata.Name).WithField("nodeName", e.Object.Spec.NodeName),
 				name:       e.Object.Metadata.Name,
 				namespace:  ns.name,
 				o:          ns.o,
 			}
 			if ns.o.mergeLabels && e.Object.Metadata.Labels != nil {
-				p.l = p.l.WithFields(getLabelsAsFields(e.Object.Metadata.Labels))
+				p.l = p.l.WithField("labels", e.Object.Metadata.Labels)
 			}
 
 			if ns.o.decode && e.Object.Metadata.Annotations != nil && e.Object.Metadata.Annotations[logFormatAnnotation] == "json" {
